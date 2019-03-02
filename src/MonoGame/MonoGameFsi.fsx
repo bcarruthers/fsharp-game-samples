@@ -2,7 +2,7 @@ module Build =
     open System.IO
 
     let init projectDir =
-        let runtimeDir = Path.Combine(projectDir, "../packages/MonoGame.Framework.DesktopGL.Core/runtimes/win-x86/native")
+        let runtimeDir = Path.Combine(projectDir, "../../packages/MonoGame.Framework.DesktopGL.Core/runtimes/win-x86/native")
         let outputDir = Path.Combine(projectDir, "output")
         Directory.CreateDirectory(outputDir) |> ignore
         for file in Directory.EnumerateFiles(runtimeDir) do
@@ -15,4 +15,4 @@ module Build =
 Build.init __SOURCE_DIRECTORY__
 
 #r "netstandard"
-#r "../packages/MonoGame.Framework.DesktopGL.Core/lib/netstandard2.0/MonoGame.Framework.dll"
+#r "../../packages/MonoGame.Framework.DesktopGL.Core/lib/netstandard2.0/MonoGame.Framework.dll"

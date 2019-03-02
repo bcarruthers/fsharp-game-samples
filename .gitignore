@@ -216,4 +216,6 @@ assets/data/particles/**
 /deploy/**
 /publish/**
 src/output
+src/MonoGame/output
 
+*.dll

@@ -41,15 +41,6 @@ module Numerics =
 // We can start by modeling the domain using types. The more specific
 // the types, the more we'll be constrained when writing logic later, 
 // which helps avoid bugs.
-// Note that all these types are value types, which requires more code
-// in the form of [<Struct>] attributes and defining values for enum
-// types. Using value types helps eliminate allocations and subsequent
-// garbage collection, but we sacrifice safety by not making full use
-// of the algebraic type system. For this game, we expect some real-time
-// requirements and potentially large changing state, so defining value
-// types here is a precaution.
-// Whether this is premature optimization or necessary to avoid a rewrite
-// later depends on the scope of the game.
 
 [<AutoOpen>]
 module Types =
