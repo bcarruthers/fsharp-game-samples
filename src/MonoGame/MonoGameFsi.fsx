@@ -2,7 +2,9 @@ module Build =
     open System.IO
 
     let init projectDir =
-        let runtimeDir = Path.Combine(projectDir, "../../packages/MonoGame.Framework.DesktopGL.Core/runtimes/win-x86/native")
+        let is64Bit = System.IntPtr.Size = 8
+        let archDir = if is64Bit then "win-x64" else "win-x86"
+        let runtimeDir = Path.Combine(projectDir, "../../packages/MonoGame.Framework.DesktopGL.Core/runtimes/" + archDir + "/native")
         let outputDir = Path.Combine(projectDir, "output")
         Directory.CreateDirectory(outputDir) |> ignore
         for file in Directory.EnumerateFiles(runtimeDir) do
