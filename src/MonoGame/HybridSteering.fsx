@@ -33,6 +33,8 @@ module Vector =
         y = y
     }
 
+    let zero = init 0.0 0.0
+
     let add a b = {
         x = a.x + b.x
         y = a.y + b.y
@@ -77,6 +79,7 @@ module Vector =
 // ----------------------------------------------------------------
 // Domain types
 
+[<Struct>]
 type Team =
     | Red
     | Orange
@@ -86,6 +89,7 @@ type Team =
     | Blue
     | Purple
 
+[<Struct>]
 type Vehicle = {
     team : Team
     position : Vector
@@ -96,6 +100,7 @@ type Vehicle = {
     trailLifespan : float
 }
 
+[<Struct>]
 type Neighbor = {
     vehicle : Vehicle
     directionToNeighbor : Vector
@@ -103,11 +108,13 @@ type Neighbor = {
     teamWeight : float
 }
 
+[<Struct>]
 type Neighborhood = {
     current : Vehicle
     neighbors : Neighbor seq
 }
 
+[<Struct>]
 type Trail = {
     team : Team
     position : Vector
@@ -137,18 +144,9 @@ type WorldSettings = {
 }
 
 type World = {
-    steering : SteeringSettings
-    vehicles : Vehicle list
-    trails : Trail list
+    vehicles : Vehicle seq
+    trails : Trail seq
 }
-
-type Model = {
-    world : World
-}
-
-type Message =
-    | Reset of WorldSettings
-    | Step of float
 
 // ----------------------------------------------------------------
 // Domain functions
@@ -208,136 +206,127 @@ module Neighborhood =
         |> Vector.multiply scale
 
     let getCohesionForce minDistance maxDistance neighborhood =
-        neighborhood.neighbors 
-        |> Seq.map (fun neighbor -> 
+        let mutable sum = Vector.zero
+        for neighbor in neighborhood.neighbors do
             let weight = Scalar.smoothStep minDistance maxDistance neighbor.distance
-            Vector.multiply (neighbor.teamWeight * weight) neighbor.directionToNeighbor) 
-        |> Seq.reduce Vector.add
-        |> Vector.normalizeOrZero
+            sum <- Vector.add sum <| Vector.multiply (neighbor.teamWeight * weight) neighbor.directionToNeighbor
+        Vector.normalizeOrZero sum
 
     let getSeparationForce maxDistance neighborhood =
-        neighborhood.neighbors 
-        |> Seq.map (fun neighbor -> 
+        let mutable sum = Vector.zero
+        for neighbor in neighborhood.neighbors do
             let weight = Scalar.smoothStep maxDistance 0.0 neighbor.distance
-            Vector.multiply -weight neighbor.directionToNeighbor)
-        |> Seq.reduce Vector.add
+            sum <- Vector.add sum <| Vector.multiply -weight neighbor.directionToNeighbor
+        sum
 
     let getAlignmentForce maxDistance neighborhood =
-        neighborhood.neighbors 
-        |> Seq.map (fun neighbor -> 
+        let mutable sum = Vector.zero
+        for neighbor in neighborhood.neighbors do
             let weight = Scalar.smoothStep maxDistance 0.0 neighbor.distance
-            Vector.multiply -(neighbor.teamWeight * weight) neighbor.vehicle.direction)
-        |> Seq.reduce Vector.add
-        |> Vector.normalizeOrZero
+            sum <- Vector.add sum <| Vector.multiply -(neighbor.teamWeight * weight) neighbor.vehicle.direction
+        Vector.normalizeOrZero sum
     
-    let getForceCalculators steering = [
-        steering.forwardWeight, getForwardForce
-        steering.tetherWeight, getTetherForce steering.maxTetherDistance
-        steering.cohesionWeight, getCohesionForce steering.maxSeparationDistance steering.maxCohesionDistance
-        steering.separationWeight, getSeparationForce steering.maxSeparationDistance
-        steering.alignmentWeight, getAlignmentForce steering.maxAlignmentDistance
-    ]
+    let getForceCalculator steering =
+        let calculators = [|
+            getForwardForce >> (Vector.multiply steering.forwardWeight)
+            getTetherForce steering.maxTetherDistance >> (Vector.multiply steering.tetherWeight)
+            getCohesionForce steering.maxSeparationDistance steering.maxCohesionDistance >> (Vector.multiply steering.cohesionWeight)
+            getSeparationForce steering.maxSeparationDistance >> (Vector.multiply steering.separationWeight)
+            getAlignmentForce steering.maxAlignmentDistance >> (Vector.multiply steering.alignmentWeight)
+            |]
+        fun neighborhood ->
+            let mutable sum = Vector.zero
+            for calc in calculators do
+                sum <- Vector.add sum <| calc neighborhood
+            Vector.normalizeOrZero sum
 
-    let getSteeringVelocity steering neighborhood =
-        getForceCalculators steering
-        |> List.map (fun (weight, calc) -> 
-            calc neighborhood
-            |> Vector.multiply weight)
-        |> Seq.reduce Vector.add
-        |> Vector.normalizeOrZero
-        |> Vector.multiply neighborhood.current.maxSpeed
+open System.Collections.Generic
 
-    let applySteeringForce steering deltaTime neighborhood =
-        let desiredVelocity = getSteeringVelocity steering neighborhood
-        Vehicle.setVelocity desiredVelocity neighborhood.current
+type WritableWorld(settings) =
+    let trails = List<Trail>()
+    let getSteeringForce = Neighborhood.getForceCalculator settings.steering
 
-module World =
-    let getNeighborhoods world =
-        world.vehicles 
-        |> List.mapi (fun i current -> {
-            current = current
-            neighbors =
-                world.vehicles
-                |> Seq.mapi (fun ni vehicle -> ni, vehicle)
-                |> Seq.filter (fun (ni, vehicle) -> ni <> i)
-                |> Seq.map (fun (ni, vehicle) -> 
-                    let offset = Vector.subtract vehicle.position current.position
-                    let distance = Vector.length offset
-                    { vehicle = vehicle
-                      teamWeight = if current.team = vehicle.team then 1.0 else 0.0
-                      directionToNeighbor = Vector.divideOrZero distance offset
-                      distance = distance
-                      })
-        })
-
-    let applySteeringForces steering deltaTime world =
-        { world with 
-            vehicles = 
-                getNeighborhoods world 
-                |> List.map (Neighborhood.applySteeringForce steering deltaTime)
-        }
-
-    let updatePositions deltaTime world =
-        { world with vehicles = world.vehicles |> List.map (Vehicle.updatePosition deltaTime) }
-
-    let updateTrails deltaTime world =
-        { world with trails = world.trails |> List.choose (Trail.update deltaTime) }
-
-    let spawnTrails world =
-        let newTrails = world.vehicles |> List.map Vehicle.spawnTrail
-        { world with trails = List.append world.trails newTrails }
-
-    let addVehicle vehicle world =
-        { world with vehicles = vehicle :: world.vehicles }
-
-    let update deltaTime world =
-        world
-        |> updateTrails deltaTime
-        |> spawnTrails
-        |> applySteeringForces world.steering deltaTime
-        |> updatePositions deltaTime
-
-    let create settings = 
+    let vehicles =
         let rand = System.Random(settings.seed)
         let nextCoord() =
             (rand.NextDouble() - 0.5) * settings.spawnRange
-        { trails = List.empty
-          steering = settings.steering
-          vehicles =
-            List.init settings.vehicleCount (fun _ -> {
-                maxSpeed = settings.maxVehicleSpeed
-                trailLifespan = settings.trailLifespan
-                team = Team.teams.[rand.Next Team.teams.Length]
-                position = Vector.init (nextCoord()) (nextCoord())
-                direction = Vector.init 0.0 1.0
-                speed = 0.0
-                radius = 1.0 
-                })
-        }
+        List<_>(Seq.init settings.vehicleCount (fun _ -> {
+            maxSpeed = settings.maxVehicleSpeed
+            trailLifespan = settings.trailLifespan
+            team = Team.teams.[rand.Next Team.teams.Length]
+            position = Vector.init (nextCoord()) (nextCoord())
+            direction = Vector.init 0.0 1.0
+            speed = 0.0
+            radius = 1.0 
+            }))
 
-module Model =
-    let init settings =
-        { world = World.create settings }
+    let addNeighbors index (list : List<_>) =
+        let current = vehicles.[index]
+        for i = 0 to vehicles.Count - 1 do
+            if i <> index then
+                let vehicle = vehicles.[i]
+                let offset = Vector.subtract vehicle.position current.position
+                let distance = Vector.length offset
+                list.Add { 
+                    vehicle = vehicle
+                    teamWeight = if current.team = vehicle.team then 1.0 else 0.0
+                    directionToNeighbor = Vector.divideOrZero distance offset
+                    distance = distance
+                }
 
-    let update msg model =
-        match msg with
-        | Reset settings ->
-            { model with 
-                world = World.create settings
+    let applySteeringForces steering deltaTime =
+        let neighbors = List<_>()
+        for i = 0 to vehicles.Count - 1 do
+            addNeighbors i neighbors
+            let neighborhood = {
+                current = vehicles.[i]
+                neighbors = neighbors
                 }
-        | Step deltaTime ->
-            { model with 
-                world = World.update deltaTime model.world
-                }
+            let newVelocity = getSteeringForce neighborhood |> Vector.multiply neighborhood.current.maxSpeed
+            vehicles.[i] <- Vehicle.setVelocity newVelocity neighborhood.current
+            neighbors.Clear()
+
+    let updatePositions deltaTime =
+        for i = 0 to vehicles.Count - 1 do
+            vehicles.[i] <- Vehicle.updatePosition deltaTime vehicles.[i]
+
+    let updateTrails deltaTime =
+        let mutable i = 0
+        while i < trails.Count do
+            match Trail.update deltaTime trails.[i] with
+            | Some trail -> 
+                trails.[i] <- trail
+            | None -> 
+                trails.[i] <- trails.[trails.Count - 1]
+                trails.RemoveAt(trails.Count - 1)
+                i <- i - 1
+            i <- i + 1
+
+    let spawnTrails() =
+        for vehicle in vehicles do
+            trails.Add (Vehicle.spawnTrail vehicle)
+
+    member c.World = {
+        vehicles = vehicles :> seq<_>
+        trails = trails :> seq<_>
+    }
+    
+    member c.Update deltaTime =
+        updateTrails deltaTime
+        spawnTrails()
+        applySteeringForces settings.steering deltaTime
+        updatePositions deltaTime
 
 // ----------------------------------------------------------------
 // View types
 
+[<Struct>]
 type SpriteType =
     | Triangle
     | Hex
     | Square
 
+[<Struct>]
 type Rgba = {
     red : float
     green : float
@@ -345,6 +334,7 @@ type Rgba = {
     alpha : float
 }
 
+[<Struct>]
 type Sprite = {
     radians : float
     spriteType : SpriteType
@@ -355,7 +345,7 @@ type Sprite = {
 
 type View = {
     zoom : float
-    sprites : Sprite list
+    sprites : Sprite seq
 }
 
 // ----------------------------------------------------------------
@@ -386,7 +376,7 @@ module View =
 
     let getTrailSprites world =
         world.trails 
-        |> List.map (fun trail -> {
+        |> Seq.map (fun trail -> {
             radians = trail.radians
             spriteType = Hex
             center = trail.position
@@ -396,7 +386,7 @@ module View =
 
     let getVehicleSprites world =
         world.vehicles 
-        |> List.map (fun vehicle -> {
+        |> Seq.map (fun vehicle -> {
             radians = Vector.radians vehicle.direction
             spriteType = Triangle
             center = vehicle.position
@@ -404,12 +394,12 @@ module View =
             color = teamToColor vehicle.team
         })
 
-    let init model = { 
+    let init world = { 
         zoom = 1.0
         sprites = 
-            List.append 
-                (getVehicleSprites model.world)
-                (getTrailSprites model.world)
+            Seq.append 
+                (getVehicleSprites world)
+                (getTrailSprites world)
         }
 
 // ----------------------------------------------------------------
@@ -469,7 +459,7 @@ module MonoGameView =
         let viewportHeight = 600
         let mutable sb = null
         let mutable tileSet = TextureSet()
-        let mutable model = Model.init settings
+        let mutable model = WritableWorld(settings)
         override c.Initialize() =
             tileSet.Add(c.GraphicsDevice, Triangle, "../triangle.png", Vector2(0.3333f, 0.5f))
             tileSet.Add(c.GraphicsDevice, Hex, "../hex.png", Vector2(0.3333f, 0.5f))
@@ -481,10 +471,9 @@ module MonoGameView =
             c.IsMouseVisible <- true
         override c.Update gameTime = 
             fps.Update()
-            let msg = Step gameTime.ElapsedGameTime.TotalSeconds
-            model <- Model.update msg model
+            model.Update gameTime.ElapsedGameTime.TotalSeconds
         override c.Draw gameTime = 
-            let view = View.init model
+            let view = View.init model.World
             let xf = 
                 Matrix.CreateScale(float32 view.zoom) *
                 Matrix.CreateTranslation(Vector3(float32 viewportWidth * 0.5f, float32 viewportHeight * 0.5f, 0.0f))
@@ -526,9 +515,9 @@ let settings = {
 run settings
 
 let test() =
-    let mutable m = World.create settings
+    let m = WritableWorld(settings)
     for i = 1 to 100 do
-        m <- World.update 0.016 m
+        m.Update 0.016
 (*
 #time
 test()

@@ -70,6 +70,7 @@ module Performance =
         let mutable elapsed = 0
         let mutable count = 0
         let mutable maxDuration = 0
+        let mutable gcState = GCState.retrieve()
         member c.Update() =
             let time = DateTime.UtcNow
             let deltaTime = int (time - lastTime).TotalMilliseconds
@@ -78,10 +79,15 @@ module Performance =
             elapsed <- elapsed + deltaTime
             maxDuration <- max maxDuration deltaTime
             if elapsed >= fpsInterval then
-                printfn "FPS: %d, max: %d ms" count maxDuration
+                let newState = GCState.retrieve()
+                let delta = GCState.getDelta gcState newState
+                printfn "FPS: %d, max: %d ms, GC: %s%s" count maxDuration
+                    (GCState.formatWithDelta newState delta)
+                    (if delta.gc2 > 0 then " **" elif delta.gc1 > 0 then " *" else "")
                 count <- 0
                 elapsed <- elapsed - fpsInterval
                 maxDuration <- 0
+                gcState <- newState
 
 module Build =
     open System.IO
