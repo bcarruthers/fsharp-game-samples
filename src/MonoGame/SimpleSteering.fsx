@@ -33,6 +33,8 @@ module Vector =
         y = y
     }
 
+    let zero = init 0.0 0.0
+
     let add a b = {
         x = a.x + b.x
         y = a.y + b.y
@@ -475,10 +477,12 @@ module MonoGameView =
             tileSet.Add(c.GraphicsDevice, Hex, "../hex.png", Vector2(0.3333f, 0.5f))
             tileSet.Add(c.GraphicsDevice, Square, "../square.png", Vector2(0.5f, 0.5f))
             sb <- new SpriteBatch(c.GraphicsDevice)            
+            graphics.SynchronizeWithVerticalRetrace <- false
             graphics.PreferredBackBufferWidth <- viewportWidth
             graphics.PreferredBackBufferHeight <- viewportHeight
             graphics.ApplyChanges()
             c.IsMouseVisible <- true
+            c.IsFixedTimeStep <- false
         override c.Update gameTime = 
             fps.Update()
             let msg = Step gameTime.ElapsedGameTime.TotalSeconds
@@ -506,7 +510,7 @@ let run settings =
 
 let settings = {
     seed = 1
-    vehicleCount = 250
+    vehicleCount = 500
     spawnRange = 300.0
     maxVehicleSpeed = 50.0
     trailLifespan = 0.6
@@ -526,9 +530,45 @@ let settings = {
 run settings
 
 let test() =
-    let mutable m = World.create settings
-    for i = 1 to 100 do
-        m <- World.update 0.016 m
+    Seq.init 20 id
+    |> Seq.fold (fun m _ -> World.update 0.016 m) (World.create settings)
+    |> ignore
+
+let runOperation() = ()
+
+#time
+for i = 1 to 100000 do
+    runOperation()
+#time
+
+
+(*
+let world = World.create settings
+
+let getForce center vehicles =
+    vehicles 
+    |> Seq.map (fun (vehicle : Vehicle) -> Vector.subtract center vehicle.position)
+    |> Seq.reduce Vector.add
+    |> Vector.normalizeOrZero
+
+let getForce2 center vehicles =
+    let mutable sum = Vector.zero
+    for vehicle : Vehicle in vehicles do
+        let delta = Vector.subtract center vehicle.position
+        sum <- Vector.add sum delta
+    Vector.normalizeOrZero sum
+
+#time
+for i = 1 to 100000 do
+    getForce Vector.zero world.vehicles |> ignore
+#time
+
+#time
+for i = 1 to 100000 do
+    getForce2 Vector.zero world.vehicles |> ignore
+#time
+*)
+
 (*
 #time
 test()

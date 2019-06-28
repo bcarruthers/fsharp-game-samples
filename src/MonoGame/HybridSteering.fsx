@@ -465,10 +465,12 @@ module MonoGameView =
             tileSet.Add(c.GraphicsDevice, Hex, "../hex.png", Vector2(0.3333f, 0.5f))
             tileSet.Add(c.GraphicsDevice, Square, "../square.png", Vector2(0.5f, 0.5f))
             sb <- new SpriteBatch(c.GraphicsDevice)            
+            graphics.SynchronizeWithVerticalRetrace <- false
             graphics.PreferredBackBufferWidth <- viewportWidth
             graphics.PreferredBackBufferHeight <- viewportHeight
             graphics.ApplyChanges()
             c.IsMouseVisible <- true
+            c.IsFixedTimeStep <- false
         override c.Update gameTime = 
             fps.Update()
             model.Update gameTime.ElapsedGameTime.TotalSeconds
@@ -495,7 +497,7 @@ let run settings =
 
 let settings = {
     seed = 1
-    vehicleCount = 250
+    vehicleCount = 500
     spawnRange = 300.0
     maxVehicleSpeed = 50.0
     trailLifespan = 0.6
@@ -523,3 +525,37 @@ let test() =
 test()
 #time
 *)
+
+open System
+
+let generate seed count =
+    let rand = Random(seed)
+    Array.init count (fun _ -> 
+        rand.Next())
+
+generate 1 10
+
+
+let getForce center vehicles =
+    vehicles 
+    |> Seq.map (fun vehicle -> Vector.subtract center vehicle.position)
+    |> Seq.reduce Vector.add
+    |> Vector.normalizeOrZero
+
+let getForce2 center vehicles =
+    let mutable sum = Vector.zero
+    for vehicle in vehicles do
+        let delta = Vector.subtract center vehicle.position
+        sum <- Vector.add sum delta
+    Vector.normalizeOrZero sum
+
+
+type World2 = {
+    vehicles : Vehicle list
+}
+
+type MutableWorld() =
+    let vehicles = List<Vehicle>()
+    member c.World = {
+        vehicles = vehicles :> seq<_>
+    }
